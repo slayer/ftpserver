@@ -33,22 +33,40 @@ var ErrInvalidParameter = errors.New("invalid parameter")
 
 // Fs is a write-only afero.Fs implementation using telegram as backend
 type Fs struct {
-	Bot    *tele.Bot
+	// Bot is the telegram bot instance
+	Bot *tele.Bot
+	// ChatID is the telegram chat ID to send files to
 	ChatID int64
+	// Logger is the logger, obviously
 	Logger log.Logger
+
+	// fakeFs is a lightweight fake filesystem intended for store temporary info about files
+	// since some ftp clients expect to perform mkdir() + stat() on files and directories before upload
+	fakeFs *fakeFilesystem
 }
 
 // File is the afero.File implementation
 type File struct {
-	Path    string
+	// Path is the file path
+	Path string
+	// Content is the file content
 	Content []byte
-	Fs      *Fs
-	At      int64
+	// Fs is the parent Fs
+	Fs *Fs
+	// At is the current position in the file
+	At int64
 }
 
+// imageExtensions is the list of supported image extensions
 var imageExtensions = []string{".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif"}
+
+// videoExtensions is the list of supported video extensions
 var videoExtensions = []string{".mp4", ".avi", ".mkv", ".mov", ".wmv", ".flv", ".webm", ".mpeg", ".mpg", ".m4v", ".3gp", ".3g2"}
+
+// textExtensions is the list of supported text extensions
 var textExtensions = []string{".txt", ".md"}
+
+// audioExtensions is the list of supported audio extensions
 var audioExtensions = []string{".mp3", ".ogg", ".flac", ".wav", ".m4a", ".opus"}
 
 // LoadFs loads a file system from an access description
@@ -70,6 +88,7 @@ func LoadFs(access *confpar.Access, logger log.Logger) (afero.Fs, error) {
 	}
 
 	bot, err := tele.NewBot(pref)
+	logger.Info("telegram bot initialization", "token", token[:10]+"...", "chatID", chatID)
 	if err != nil {
 		logger.Error("telegram bot initialization", "err", err)
 		return nil, err
@@ -77,10 +96,8 @@ func LoadFs(access *confpar.Access, logger log.Logger) (afero.Fs, error) {
 	bot.Use(middleware.Logger())
 	bot.Use(middleware.AutoRespond())
 
-	// Just to check that the bot is working
-	bot.Handle("/hello", func(c tele.Context) error {
-		return c.Send("Hello!")
-	})
+	bot.Handle("/start", startHandler)
+	bot.Handle("/help", helpHandler)
 
 	go func() {
 		// Run bot in the background
@@ -91,6 +108,7 @@ func LoadFs(access *confpar.Access, logger log.Logger) (afero.Fs, error) {
 		Bot:    bot,
 		Logger: logger,
 		ChatID: chatID,
+		fakeFs: newFakeFilesystem(),
 	}
 
 	return fs, nil
@@ -135,6 +153,9 @@ func (f *File) Close() error {
 		f.Fs.Logger.Error("telegram Bot.Send()", "err", err)
 		return err
 	}
+
+	f.Fs.fakeFs.create(f.Path)
+	f.Fs.fakeFs.setSize(f.Path, int64(len(f.Content)))
 
 	f.Content = []byte{}
 	f.At = 0
@@ -187,10 +208,14 @@ func (f *File) Seek(_ int64, _ int) (int64, error) {
 	return 0, nil
 }
 
-// Stat is not implemented
+// Stat for the file relies on the fake filesystem
 func (f *File) Stat() (os.FileInfo, error) {
-	f.Fs.Logger.Error("telegram File.Stat() not implemented")
-	return nil, ErrNotImplemented
+	fileInfo := f.Fs.fakeFs.stat(f.Path)
+
+	if fileInfo == nil {
+		return nil, &os.PathError{Op: "stat", Path: f.Path, Err: nil}
+	}
+	return fileInfo, nil
 }
 
 // Sync is not implemented
@@ -249,13 +274,23 @@ func (m *Fs) Remove(name string) error {
 	return nil
 }
 
-// Mkdir is not implemented
+// Mkdir
 func (m *Fs) Mkdir(name string, mode os.FileMode) error {
+	m.Logger.Info("telegram Mkdir()", "name", name, "mode", mode)
+	m.fakeFs.mkdir(name, mode)
 	return nil
 }
 
-// MkdirAll is not implemented
+// MkdirAll creates full path of directories
+// like mkdir -p
 func (m *Fs) MkdirAll(name string, mode os.FileMode) error {
+	m.Logger.Info("telegram MkdirAll()", "name", name, "mode", mode)
+	path := strings.Split(name, "/")
+	for i := 0; i < len(path); i++ {
+		dir := strings.Join(path[:i+1], "/")
+		m.Logger.Info("telegram MkdirAll()", "dir", dir)
+		m.fakeFs.mkdir(dir, mode)
+	}
 	return nil
 }
 
@@ -266,6 +301,7 @@ func (m *Fs) Open(name string) (afero.File, error) {
 
 // Create creates a file buffer
 func (m *Fs) Create(name string) (afero.File, error) {
+	m.fakeFs.create(name)
 	return &File{Path: name, Fs: m}, nil
 }
 
@@ -274,9 +310,15 @@ func (m *Fs) OpenFile(name string, flag int, mode os.FileMode) (afero.File, erro
 	return &File{Path: name, Fs: m}, nil
 }
 
-// Stat is not implemented
+// Stat() fake implementation
 func (m *Fs) Stat(name string) (os.FileInfo, error) {
-	return nil, &os.PathError{Op: "stat", Path: name, Err: nil}
+	fileInfo := m.fakeFs.stat(name)
+	m.Logger.Info("telegram Stat()", "name", name, "fileInfo", fmt.Sprintf("%#v", fileInfo))
+
+	if fileInfo == nil {
+		return nil, &os.PathError{Op: "stat", Path: name, Err: nil}
+	}
+	return fileInfo, nil
 }
 
 // LstatIfPossible is not implemented
@@ -292,4 +334,31 @@ func isExtension(filename string, extensions []string) bool {
 		}
 	}
 	return false
+}
+
+const readMeURL = "https://github.com/slayer/ftpserver"
+
+// /start command handler
+func startHandler(c tele.Context) error {
+	err := helpHandler(c)
+	if err != nil {
+		return err
+	}
+	var chatID int64
+	chat := c.Chat()
+	if chat != nil {
+		chatID = chat.ID
+	}
+
+	err = c.Send(fmt.Sprintf("Current `ChatID` is `%d`", chatID), tele.ModeMarkdown)
+	return err
+}
+
+func helpHandler(c tele.Context) error {
+	firstName := "<unknown>"
+	if c.Sender() != nil {
+		firstName = c.Sender().FirstName
+	}
+	message := fmt.Sprintf("Hello %s!, you can read more about me at %s", firstName, readMeURL)
+	return c.Send(message)
 }
