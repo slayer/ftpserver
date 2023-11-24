@@ -1,3 +1,10 @@
 builds:
   - ldflags:
       - -s -w -X main.BuildVersion={{.Version}} -X main.Commit={{.Commit}} -X main.BuildDate={{.Date}}
+  - goarch:
+    - amd64
+    - arm
+    - arm64
+  - goarm:
+    - 6
+    - 7
