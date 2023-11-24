@@ -88,7 +88,6 @@ func LoadFs(access *confpar.Access, logger log.Logger) (afero.Fs, error) {
 	}
 
 	bot, err := tele.NewBot(pref)
-	logger.Info("telegram bot initialization", "token", token[:10]+"...", "chatID", chatID)
 	if err != nil {
 		logger.Error("telegram bot initialization", "err", err)
 		return nil, err
@@ -148,6 +147,7 @@ func (f *File) Close() error {
 		document.FileLocal = basePath
 		_, err = f.Fs.Bot.Send(&chat, &document)
 	}
+	f.Fs.Logger.Info("telegram Bot.Send()", "path", f.Path)
 
 	if err != nil {
 		f.Fs.Logger.Error("telegram Bot.Send()", "err", err)
@@ -276,7 +276,6 @@ func (m *Fs) Remove(name string) error {
 
 // Mkdir
 func (m *Fs) Mkdir(name string, mode os.FileMode) error {
-	m.Logger.Info("telegram Mkdir()", "name", name, "mode", mode)
 	m.fakeFs.mkdir(name, mode)
 	return nil
 }
@@ -284,11 +283,9 @@ func (m *Fs) Mkdir(name string, mode os.FileMode) error {
 // MkdirAll creates full path of directories
 // like mkdir -p
 func (m *Fs) MkdirAll(name string, mode os.FileMode) error {
-	m.Logger.Info("telegram MkdirAll()", "name", name, "mode", mode)
 	path := strings.Split(name, "/")
 	for i := 0; i < len(path); i++ {
 		dir := strings.Join(path[:i+1], "/")
-		m.Logger.Info("telegram MkdirAll()", "dir", dir)
 		m.fakeFs.mkdir(dir, mode)
 	}
 	return nil
@@ -313,7 +310,6 @@ func (m *Fs) OpenFile(name string, flag int, mode os.FileMode) (afero.File, erro
 // Stat() fake implementation
 func (m *Fs) Stat(name string) (os.FileInfo, error) {
 	fileInfo := m.fakeFs.stat(name)
-	m.Logger.Info("telegram Stat()", "name", name, "fileInfo", fmt.Sprintf("%#v", fileInfo))
 
 	if fileInfo == nil {
 		return nil, &os.PathError{Op: "stat", Path: name, Err: nil}

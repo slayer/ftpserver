@@ -2,7 +2,9 @@
 
 ## Register bot
 
-Read about telegram bots at https://core.telegram.org/bots/tutorial
+Read about telegram bots at https://core.telegram.org/bots/tutorial.
+
+Bots are not allowed to contact users. You need to make the first contact from the user for which you want to set up the bot.
 
 ### Quick start
 
@@ -17,7 +19,7 @@ Read about telegram bots at https://core.telegram.org/bots/tutorial
 ## Config example
 
 Please note about `shared` flag. If it's `true` then bot instance will be shared between all connections.
-If it's `false` then each user will have own bot instance and it can lead to telegram bot flood protection.
+If it's `false` then each user (or even each ftp connection) will have own bot instance and it can lead to telegram bot flood protection.
 
 ```json
 {
