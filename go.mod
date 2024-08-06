@@ -1,26 +1,28 @@
 module github.com/fclairamb/ftpserver
 
-go 1.19
+go 1.21
+
+toolchain go1.22.5
 
 require (
-	github.com/aws/aws-sdk-go v1.51.3
+	github.com/aws/aws-sdk-go v1.55.5
 	github.com/fclairamb/afero-dropbox v0.1.0
 	github.com/fclairamb/afero-gdrive v0.3.0
 	github.com/fclairamb/afero-s3 v0.3.1
 	github.com/fclairamb/afero-snd v0.1.0
-	github.com/fclairamb/ftpserverlib v0.23.0
-	github.com/fclairamb/go-log v0.4.1
+	github.com/fclairamb/ftpserverlib v0.24.1
+	github.com/fclairamb/go-log v0.5.0
 	github.com/go-mail/mail v2.3.1+incompatible
 	github.com/pkg/sftp v1.13.6
 	github.com/spf13/afero v1.11.0
 	github.com/tidwall/sjson v1.2.5
-	golang.org/x/crypto v0.21.0
-	golang.org/x/oauth2 v0.18.0
-	gopkg.in/telebot.v3 v3.2.1
+	golang.org/x/crypto v0.25.0
+	golang.org/x/oauth2 v0.22.0
+	gopkg.in/telebot.v3 v3.3.8
 )
 
 require (
-	cloud.google.com/go/compute/metadata v0.2.3 // indirect
+	cloud.google.com/go/compute/metadata v0.3.0 // indirect
 	github.com/google/s2a-go v0.1.7 // indirect
 	github.com/google/uuid v1.4.0 // indirect
 	github.com/tidwall/gjson v1.14.4 // indirect
@@ -42,8 +44,8 @@ require (
 	github.com/kr/fs v0.1.0 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	golang.org/x/net v0.22.0 // indirect
-	golang.org/x/sys v0.18.0 // indirect
-	golang.org/x/text v0.14.0 // indirect
+	golang.org/x/sys v0.22.0 // indirect
+	golang.org/x/text v0.16.0 // indirect
 	google.golang.org/api v0.152.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/grpc v1.59.0 // indirect
