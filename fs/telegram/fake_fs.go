@@ -5,8 +5,10 @@ import (
 	"sync"
 )
 
-// fakeFilesystem is a really simple and limited fake filesystem intended for store temporary info about files
-// since some ftp clients expect to perform mkdir() + stat() on files and directories before upload
+// fakeFilesystem is a minimal in-memory filesystem implementation that stores temporary metadata
+// about files and directories. It provides basic operations (mkdir, create, stat) to satisfy
+// FTP client expectations that require directory creation and file stat operations before uploads.
+// This is not a persistent filesystem - all data is lost when the process terminates.
 type fakeFilesystem struct {
 	sync.Mutex
 	dict map[string]*FileInfo
@@ -55,5 +57,3 @@ func (f *fakeFilesystem) stat(name string) *FileInfo {
 	defer f.Unlock()
 	return f.dict[name]
 }
-
-
