@@ -549,6 +549,41 @@ func TestFsStop(t *testing.T) {
 	// as it would require valid Telegram credentials and network access
 }
 
+// TestFsStopMultipleCalls tests that Stop() can be called multiple times safely
+func TestFsStopMultipleCalls(t *testing.T) {
+	// Test that calling Stop() multiple times doesn't panic
+	// even when trying to close an already-closed channel
+	fs := &Fs{
+		Bot:      nil, // nil bot to keep test simple
+		Logger:   newTestLogger(),
+		stopChan: make(chan struct{}),
+	}
+
+	// Call Stop() multiple times
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := fs.Stop()
+			if err != nil {
+				t.Errorf("Stop() returned error: %v", err)
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	// All calls should succeed without panic
+	// The channel should remain unclosed (since Bot is nil)
+	select {
+	case <-fs.stopChan:
+		t.Error("Channel should not be closed when Bot is nil")
+	default:
+		// Good, channel is still open
+	}
+}
+
 // TestFileWriteSizeLimit tests that Write enforces the file size limit
 func TestFileWriteSizeLimit(t *testing.T) {
 	fs := &Fs{

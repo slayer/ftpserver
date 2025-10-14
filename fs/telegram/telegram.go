@@ -55,6 +55,8 @@ type Fs struct {
 
 	// stopChan is used to signal bot shutdown
 	stopChan chan struct{}
+	// stopOnce ensures Stop() can be called multiple times safely
+	stopOnce sync.Once
 }
 
 // File is the afero.File implementation
@@ -278,12 +280,15 @@ func (m *Fs) Name() string {
 }
 
 // Stop gracefully shuts down the telegram bot
+// This method is safe to call multiple times
 func (m *Fs) Stop() error {
-	if m.Bot != nil {
-		m.Logger.Info("Stopping telegram bot")
-		m.Bot.Stop()
-		close(m.stopChan)
-	}
+	m.stopOnce.Do(func() {
+		if m.Bot != nil {
+			m.Logger.Info("Stopping telegram bot")
+			m.Bot.Stop()
+			close(m.stopChan)
+		}
+	})
 	return nil
 }
 
