@@ -36,8 +36,7 @@ jobs:
 
       - name: Test
         # We need GCC because of the "go test -race"
+        # Note: GCC is pre-installed on ubuntu-24.04 runners
         # env:
         #   CGO_ENABLED: 0
-        run: |
-          apt-get update && apt-get install gcc -y
-          go test -race -v ./...
+        run: go test -race -v ./...
