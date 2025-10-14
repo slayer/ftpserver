@@ -6,6 +6,9 @@ import (
 	"time"
 )
 
+// defaultDirSize is a standard directory size (4096 bytes, typical for filesystems)
+const defaultDirSize = 4096
+
 // FileData is a simple structure to store file information and implement os.FileInfo interface
 type FileData struct {
 	name    string
@@ -31,7 +34,7 @@ func (s *FileInfo) IsDir() bool        { return s.dir }
 func (s *FileInfo) Sys() interface{}   { return nil }
 func (s *FileInfo) Size() int64 {
 	if s.IsDir() {
-		return int64(42)
+		return defaultDirSize
 	}
 	return s.size
 }

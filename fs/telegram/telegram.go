@@ -5,21 +5,20 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
-
-	"os"
-	"sync/atomic"
+	"sync"
 	"time"
+	"unicode/utf8"
 
 	log "github.com/fclairamb/go-log"
-	tele "gopkg.in/telebot.v3"
-
 	"github.com/spf13/afero"
+	tele "gopkg.in/telebot.v3"
+	"gopkg.in/telebot.v3/middleware"
 
 	"github.com/fclairamb/ftpserver/config/confpar"
-	"gopkg.in/telebot.v3/middleware"
 )
 
 // ErrNotImplemented is returned when something is not implemented
@@ -30,6 +29,16 @@ var ErrNotFound = errors.New("not found")
 
 // ErrInvalidParameter is returned when a parameter is invalid
 var ErrInvalidParameter = errors.New("invalid parameter")
+
+// ErrFileTooLarge is returned when a file exceeds Telegram's size limit
+var ErrFileTooLarge = errors.New("file size exceeds Telegram limit")
+
+const (
+	// maxFileSize is Telegram's file size limit (50MB)
+	maxFileSize = 50 * 1024 * 1024
+	// maxTextSize is Telegram's message size limit (4096 characters)
+	maxTextSize = 4096
+)
 
 // Fs is a write-only afero.Fs implementation using telegram as backend
 type Fs struct {
@@ -43,6 +52,9 @@ type Fs struct {
 	// fakeFs is a lightweight fake filesystem intended for store temporary info about files
 	// since some ftp clients expect to perform mkdir() + stat() on files and directories before upload
 	fakeFs *fakeFilesystem
+
+	// stopChan is used to signal bot shutdown
+	stopChan chan struct{}
 }
 
 // File is the afero.File implementation
@@ -55,6 +67,8 @@ type File struct {
 	Fs *Fs
 	// At is the current position in the file
 	At int64
+	// mu protects Content and At from concurrent access
+	mu sync.Mutex
 }
 
 // imageExtensions is the list of supported image extensions
@@ -98,17 +112,20 @@ func LoadFs(access *confpar.Access, logger log.Logger) (afero.Fs, error) {
 	bot.Handle("/start", startHandler)
 	bot.Handle("/help", helpHandler)
 
+	fs := &Fs{
+		Bot:      bot,
+		Logger:   logger,
+		ChatID:   chatID,
+		fakeFs:   newFakeFilesystem(),
+		stopChan: make(chan struct{}),
+	}
+
 	go func() {
 		// Run bot in the background
+		logger.Info("Starting telegram bot")
 		bot.Start()
+		logger.Info("Telegram bot stopped")
 	}()
-
-	fs := &Fs{
-		Bot:    bot,
-		Logger: logger,
-		ChatID: chatID,
-		fakeFs: newFakeFilesystem(),
-	}
 
 	return fs, nil
 }
@@ -135,8 +152,15 @@ func (f *File) Close() error {
 	} else if isExtension(f.Path, audioExtensions) {
 		audio := tele.Audio{File: tele.FromReader(f), Caption: basePath}
 		_, err = f.Fs.Bot.Send(&chat, &audio)
-	} else if isExtension(f.Path, textExtensions) && len(f.Content) < 4096 {
-		if isExtension(f.Path, []string{".md"}) {
+	} else if isExtension(f.Path, textExtensions) && len(f.Content) < maxTextSize {
+		// Validate UTF-8 for text files
+		if !utf8.Valid(f.Content) {
+			f.Fs.Logger.Warn("Invalid UTF-8 in text file, sending as document", "path", f.Path)
+			document := tele.Document{File: tele.FromReader(f), Caption: basePath}
+			document.FileName = basePath
+			document.FileLocal = basePath
+			_, err = f.Fs.Bot.Send(&chat, &document)
+		} else if isExtension(f.Path, []string{".md"}) {
 			_, err = f.Fs.Bot.Send(&chat, string(f.Content), tele.ModeMarkdown)
 		} else {
 			_, err = f.Fs.Bot.Send(&chat, string(f.Content))
@@ -165,20 +189,20 @@ func (f *File) Close() error {
 
 // Read stores the received file content into the local buffer
 func (f *File) Read(b []byte) (int, error) {
-	n := 0
+	f.mu.Lock()
+	defer f.mu.Unlock()
 
 	if len(b) > 0 && int(f.At) == len(f.Content) {
 		return 0, io.EOF
 	}
 
-	if len(f.Content)-int(f.At) >= len(b) {
-		n = len(b)
-	} else {
+	n := len(b)
+	if len(f.Content)-int(f.At) < n {
 		n = len(f.Content) - int(f.At)
 	}
 
 	copy(b, f.Content[f.At:f.At+int64(n)])
-	atomic.AddInt64(&f.At, int64(n))
+	f.At += int64(n)
 
 	return n, nil
 }
@@ -213,7 +237,7 @@ func (f *File) Stat() (os.FileInfo, error) {
 	fileInfo := f.Fs.fakeFs.stat(f.Path)
 
 	if fileInfo == nil {
-		return nil, &os.PathError{Op: "stat", Path: f.Path, Err: nil}
+		return nil, &os.PathError{Op: "stat", Path: f.Path, Err: os.ErrNotExist}
 	}
 	return fileInfo, nil
 }
@@ -234,6 +258,15 @@ func (f *File) WriteAt(b []byte, off int64) (int, error) {
 }
 
 func (f *File) Write(b []byte) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	// Check if writing would exceed Telegram's file size limit
+	newSize := int64(len(f.Content)) + int64(len(b))
+	if newSize > maxFileSize {
+		return 0, fmt.Errorf("%w: attempted size %d bytes, limit is %d bytes", ErrFileTooLarge, newSize, maxFileSize)
+	}
+
 	f.Content = append(f.Content, b...)
 
 	return len(b), nil
@@ -242,6 +275,16 @@ func (f *File) Write(b []byte) (int, error) {
 // Name of the filesystem
 func (m *Fs) Name() string {
 	return "telegram"
+}
+
+// Stop gracefully shuts down the telegram bot
+func (m *Fs) Stop() error {
+	if m.Bot != nil {
+		m.Logger.Info("Stopping telegram bot")
+		m.Bot.Stop()
+		close(m.stopChan)
+	}
+	return nil
 }
 
 // Chtimes is not implemented
@@ -312,14 +355,14 @@ func (m *Fs) Stat(name string) (os.FileInfo, error) {
 	fileInfo := m.fakeFs.stat(name)
 
 	if fileInfo == nil {
-		return nil, &os.PathError{Op: "stat", Path: name, Err: nil}
+		return nil, &os.PathError{Op: "stat", Path: name, Err: os.ErrNotExist}
 	}
 	return fileInfo, nil
 }
 
 // LstatIfPossible is not implemented
 func (m *Fs) LstatIfPossible(name string) (os.FileInfo, bool, error) {
-	return nil, false, &os.PathError{Op: "lstat", Path: name, Err: nil}
+	return nil, false, &os.PathError{Op: "lstat", Path: name, Err: os.ErrNotExist}
 }
 
 func isExtension(filename string, extensions []string) bool {
@@ -335,6 +378,8 @@ func isExtension(filename string, extensions []string) bool {
 const readMeURL = "https://github.com/slayer/ftpserver"
 
 // /start command handler
+// Note: This handler responds to any user. For production use, consider adding
+// authorization checks to restrict access to specific chat IDs only.
 func startHandler(c tele.Context) error {
 	err := helpHandler(c)
 	if err != nil {
@@ -346,10 +391,15 @@ func startHandler(c tele.Context) error {
 		chatID = chat.ID
 	}
 
+	// Warning: This reveals the chat ID to any user who sends /start
+	// In a production environment, consider restricting this information
 	err = c.Send(fmt.Sprintf("Current `ChatID` is `%d`", chatID), tele.ModeMarkdown)
 	return err
 }
 
+// helpHandler responds to /help command
+// Note: This handler responds to any user. For production use, consider adding
+// authorization checks to restrict access to specific chat IDs only.
 func helpHandler(c tele.Context) error {
 	firstName := "<unknown>"
 	if c.Sender() != nil {
