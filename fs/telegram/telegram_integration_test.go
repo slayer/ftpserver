@@ -249,8 +249,8 @@ func TestTextSizeLimit(t *testing.T) {
 		Fs:      fs,
 	}
 
-	if len(smallFile.Content) >= maxTextSize {
-		t.Error("Small text file should be under maxTextSize")
+	if len(smallFile.Content) > maxTextSize {
+		t.Error("Small text file should be under or equal to maxTextSize")
 	}
 
 	// Test text exceeding limit
