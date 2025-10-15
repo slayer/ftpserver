@@ -89,7 +89,7 @@ func TestFileInfo(t *testing.T) {
 	if dirInfo.Mode() != 0755 {
 		t.Errorf("Expected mode 0755, got %v", dirInfo.Mode())
 	}
-	// Directory size is returned as a constant value (42 in the current implementation)
+	// Directory size is returned as a constant value (defaultDirSize, currently 4096, in the current implementation)
 	if !dirInfo.IsDir() || dirInfo.Size() <= 0 {
 		t.Errorf("Expected positive dir size, got %d", dirInfo.Size())
 	}
