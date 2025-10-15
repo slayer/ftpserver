@@ -241,7 +241,7 @@ func TestTextSizeLimit(t *testing.T) {
 		stopChan: make(chan struct{}),
 	}
 
-	// Test text under limit
+	// Test text under limit (character count)
 	smallText := strings.Repeat("a", maxTextSize-10)
 	smallFile := &File{
 		Path:    "/small.txt",
@@ -253,7 +253,7 @@ func TestTextSizeLimit(t *testing.T) {
 		t.Error("Small text file should be under or equal to maxTextSize")
 	}
 
-	// Test text exceeding limit
+	// Test text exceeding limit (character count)
 	largeText := strings.Repeat("a", maxTextSize+100)
 	largeFile := &File{
 		Path:    "/large.txt",
@@ -263,6 +263,85 @@ func TestTextSizeLimit(t *testing.T) {
 
 	if len(largeFile.Content) <= maxTextSize {
 		t.Error("Large text file should exceed maxTextSize")
+	}
+}
+
+// TestTextSizeLimitUTF8 tests text file size limit with multi-byte UTF-8 characters
+func TestTextSizeLimitUTF8(t *testing.T) {
+	logger := newTestLogger()
+
+	fs := &Fs{
+		Bot:      nil,
+		Logger:   logger,
+		ChatID:   789789789,
+		fakeFs:   newFakeFilesystem(),
+		stopChan: make(chan struct{}),
+	}
+
+	// Test 1: Emoji (4 bytes per character)
+	// Create exactly 4096 emoji characters = 16384 bytes
+	emojiText := strings.Repeat("😀", 4096)
+	emojiFile := &File{
+		Path:    "/emoji.txt",
+		Content: []byte(emojiText),
+		Fs:      fs,
+	}
+
+	// Should be treated as text (exactly at character limit)
+	byteLen := len(emojiFile.Content)
+	runeCount := len([]rune(emojiText))
+
+	t.Logf("Emoji: %d bytes, %d characters", byteLen, runeCount)
+
+	if runeCount != maxTextSize {
+		t.Errorf("Expected exactly %d characters, got %d", maxTextSize, runeCount)
+	}
+
+	if byteLen != 16384 {
+		t.Errorf("Expected 16384 bytes (4096 × 4), got %d", byteLen)
+	}
+
+	// Test 2: Cyrillic (2 bytes per character)
+	// Create exactly 4096 cyrillic characters = 8192 bytes
+	cyrillicText := strings.Repeat("П", 4096)
+	cyrillicFile := &File{
+		Path:    "/cyrillic.txt",
+		Content: []byte(cyrillicText),
+		Fs:      fs,
+	}
+
+	cyrillicBytes := len(cyrillicFile.Content)
+	cyrillicRunes := len([]rune(cyrillicText))
+
+	t.Logf("Cyrillic: %d bytes, %d characters", cyrillicBytes, cyrillicRunes)
+
+	if cyrillicRunes != maxTextSize {
+		t.Errorf("Expected exactly %d characters, got %d", maxTextSize, cyrillicRunes)
+	}
+
+	if cyrillicBytes != 8192 {
+		t.Errorf("Expected 8192 bytes (4096 × 2), got %d", cyrillicBytes)
+	}
+
+	// Test 3: ASCII (1 byte per character)
+	asciiText := strings.Repeat("a", 4096)
+	asciiFile := &File{
+		Path:    "/ascii.txt",
+		Content: []byte(asciiText),
+		Fs:      fs,
+	}
+
+	asciiBytes := len(asciiFile.Content)
+	asciiRunes := len([]rune(asciiText))
+
+	t.Logf("ASCII: %d bytes, %d characters", asciiBytes, asciiRunes)
+
+	if asciiRunes != maxTextSize {
+		t.Errorf("Expected exactly %d characters, got %d", maxTextSize, asciiRunes)
+	}
+
+	if asciiBytes != 4096 {
+		t.Errorf("Expected 4096 bytes (4096 × 1), got %d", asciiBytes)
 	}
 }
 

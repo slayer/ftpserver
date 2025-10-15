@@ -36,7 +36,8 @@ var ErrFileTooLarge = errors.New("file size exceeds Telegram limit")
 const (
 	// maxFileSize is Telegram's file size limit (50MB)
 	maxFileSize = 50 * 1024 * 1024
-	// maxTextSize is Telegram's message size limit (4096 characters)
+	// maxTextSize is Telegram's message size limit (4096 UTF-8 characters/runes, not bytes)
+	// Note: A 4096-character message can be up to 16KB in bytes (if all emojis)
 	maxTextSize = 4096
 )
 
@@ -154,7 +155,7 @@ func (f *File) Close() error {
 	} else if isExtension(f.Path, audioExtensions) {
 		audio := tele.Audio{File: tele.FromReader(f), Caption: basePath}
 		_, err = f.Fs.Bot.Send(&chat, &audio)
-	} else if isExtension(f.Path, textExtensions) && len(f.Content) <= maxTextSize {
+	} else if isExtension(f.Path, textExtensions) && utf8.RuneCountInString(string(f.Content)) <= maxTextSize {
 		// Validate UTF-8 for text files
 		if !utf8.Valid(f.Content) {
 			f.Fs.Logger.Warn("Invalid UTF-8 in text file, sending as document", "path", f.Path)
