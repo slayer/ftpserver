@@ -10,15 +10,12 @@ import (
 type fakeFilesystem struct {
 	sync.Mutex
 	dict map[string]*FileInfo
-	// dir fakeDir
 }
-
 
 // newFakeFilesystem creates a new fake filesystem
 func newFakeFilesystem() *fakeFilesystem {
 	return &fakeFilesystem{
 		dict: map[string]*FileInfo{},
-		// dir: fakeDir{content: []os.FileInfo{}},
 	}
 }
 
